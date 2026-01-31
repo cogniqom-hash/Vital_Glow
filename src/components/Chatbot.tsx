@@ -99,7 +99,7 @@ const suggestedQuestions = [
 ];
 
 // Cloudflare Worker API endpoint
-const CHATBOT_API_URL = 'https://vitalglowuk.cogniq-om.workers.dev';
+const CHATBOT_API_URL = 'https://vitalglow.cogniq-om.workers.dev';
 
 const Chatbot = () => {
     const [isOpen, setIsOpen] = useState(false);
