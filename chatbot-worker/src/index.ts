@@ -126,7 +126,7 @@ export default {
                 const errorText = await geminiResponse.text();
                 console.error('Gemini API error:', errorText);
                 return new Response(
-                    JSON.stringify({ error: 'Failed to get response from AI' }),
+                    JSON.stringify({ error: 'Failed to get response from AI', details: errorText }),
                     {
                         status: 500,
                         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
