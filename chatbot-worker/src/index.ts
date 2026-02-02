@@ -1,20 +1,15 @@
 /**
  * Vital Glow Chatbot Worker
- * Cloudflare Worker that integrates with Gemini API for AI-powered chat
+ * Cloudflare Worker that integrates with Groq API for AI-powered chat
  */
 
 interface Env {
-    GEMINI_API_KEY: string;
+    GROQ_API_KEY: string;
 }
 
 interface ChatRequest {
     message: string;
     history?: { role: 'user' | 'model'; content: string }[];
-}
-
-interface GeminiContent {
-    role: 'user' | 'model';
-    parts: { text: string }[];
 }
 
 const SYSTEM_PROMPT = `You are a helpful and friendly assistant for Vital Glow, a UK-based IV drip therapy and aesthetic treatments clinic.
@@ -85,47 +80,40 @@ export default {
                 });
             }
 
-            // Build conversation contents for Gemini
-            const contents: GeminiContent[] = [
-                // System instruction as first user message
-                { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-                { role: 'model', parts: [{ text: 'Understood! I am ready to assist Vital Glow customers.' }] },
+            // Build messages array for Groq (OpenAI-compatible format)
+            const messages = [
+                { role: 'system', content: SYSTEM_PROMPT },
                 // Previous conversation history
                 ...history.map((msg) => ({
-                    role: msg.role,
-                    parts: [{ text: msg.content }],
+                    role: msg.role === 'model' ? 'assistant' : 'user',
+                    content: msg.content,
                 })),
                 // Current user message
-                { role: 'user', parts: [{ text: message }] },
+                { role: 'user', content: message },
             ];
 
-            // Call Gemini API
-            const apiKey = env.GEMINI_API_KEY.trim();
-            const geminiResponse = await fetch(
-                `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+            // Call Groq API
+            const apiKey = env.GROQ_API_KEY.trim();
+            const groqResponse = await fetch(
+                'https://api.groq.com/openai/v1/chat/completions',
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                    },
                     body: JSON.stringify({
-                        contents,
-                        generationConfig: {
-                            temperature: 0.7,
-                            maxOutputTokens: 500,
-                            topP: 0.9,
-                        },
-                        safetySettings: [
-                            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-                            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-                            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-                            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-                        ],
+                        model: 'llama-3.3-70b-versatile',
+                        messages,
+                        temperature: 0.7,
+                        max_tokens: 500,
                     }),
                 }
             );
 
-            if (!geminiResponse.ok) {
-                const errorText = await geminiResponse.text();
-                console.error('Gemini API error:', errorText);
+            if (!groqResponse.ok) {
+                const errorText = await groqResponse.text();
+                console.error('Groq API error:', errorText);
                 return new Response(
                     JSON.stringify({ error: 'Failed to get response from AI', details: errorText }),
                     {
@@ -135,12 +123,12 @@ export default {
                 );
             }
 
-            const geminiData = (await geminiResponse.json()) as {
-                candidates?: { content?: { parts?: { text?: string }[] } }[];
+            const groqData = (await groqResponse.json()) as {
+                choices?: { message?: { content?: string } }[];
             };
 
             const responseText =
-                geminiData.candidates?.[0]?.content?.parts?.[0]?.text ||
+                groqData.choices?.[0]?.message?.content ||
                 "I'm sorry, I couldn't generate a response. Please try again or contact us directly at vitalglow.uk@gmail.com";
 
             return new Response(JSON.stringify({ response: responseText }), {
@@ -149,7 +137,7 @@ export default {
         } catch (error) {
             console.error('Worker error:', error);
             return new Response(
-                JSON.stringify({ error: 'An unexpected error occurred' }),
+                JSON.stringify({ error: 'Internal server error' }),
                 {
                     status: 500,
                     headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
