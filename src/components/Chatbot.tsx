@@ -1,7 +1,51 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import styles from './Chatbot.module.css';
+
+// TypeScript declarations for Web Speech API
+interface SpeechRecognitionEvent extends Event {
+    results: SpeechRecognitionResultList;
+    resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+    length: number;
+    item(index: number): SpeechRecognitionResult;
+    [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+    length: number;
+    item(index: number): SpeechRecognitionAlternative;
+    [index: number]: SpeechRecognitionAlternative;
+    isFinal: boolean;
+}
+
+interface SpeechRecognitionAlternative {
+    transcript: string;
+    confidence: number;
+}
+
+interface SpeechRecognition extends EventTarget {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onresult: ((event: SpeechRecognitionEvent) => void) | null;
+    onerror: ((event: Event) => void) | null;
+    onend: (() => void) | null;
+    onstart: (() => void) | null;
+    start(): void;
+    stop(): void;
+    abort(): void;
+}
+
+declare global {
+    interface Window {
+        SpeechRecognition: new () => SpeechRecognition;
+        webkitSpeechRecognition: new () => SpeechRecognition;
+    }
+}
 
 interface Message {
     id: number;
@@ -116,11 +160,221 @@ const Chatbot = () => {
     const [submitStatus, setSubmitStatus] = useState<'idle' | 'clearing'>('idle');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Voice AI state
+    const [isListening, setIsListening] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [voiceEnabled, setVoiceEnabled] = useState(true);
+    const [speechSupported, setSpeechSupported] = useState(true);
+    const recognitionRef = useRef<SpeechRecognition | null>(null);
+    const synthRef = useRef<SpeechSynthesis | null>(null);
+    const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+    const pendingVoiceMessageRef = useRef<string>('');
+
+    // Initialize Speech APIs
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            // Check for Speech Recognition support
+            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognitionAPI) {
+                recognitionRef.current = new SpeechRecognitionAPI();
+                recognitionRef.current.continuous = false;
+                recognitionRef.current.interimResults = true;
+                recognitionRef.current.lang = 'en-GB';
+
+                recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
+                    const transcript = Array.from({ length: event.results.length })
+                        .map((_, i) => event.results[i][0].transcript)
+                        .join('');
+                    setInputValue(transcript);
+
+                    // Auto-send when final result is received
+                    if (event.results[event.results.length - 1].isFinal && transcript.trim()) {
+                        pendingVoiceMessageRef.current = transcript.trim();
+                        setIsListening(false);
+                    }
+                };
+
+                recognitionRef.current.onerror = () => {
+                    setIsListening(false);
+                };
+
+                recognitionRef.current.onend = () => {
+                    setIsListening(false);
+                    // Auto-send the message when listening ends
+                    if (pendingVoiceMessageRef.current) {
+                        const messageToSend = pendingVoiceMessageRef.current;
+                        pendingVoiceMessageRef.current = '';
+                        // Trigger send via a small delay to allow state updates
+                        setTimeout(() => {
+                            handleVoiceSend(messageToSend);
+                        }, 100);
+                    }
+                };
+            } else {
+                setSpeechSupported(false);
+            }
+
+            // Check for Speech Synthesis support
+            if (window.speechSynthesis) {
+                synthRef.current = window.speechSynthesis;
+
+                // Select a polite female voice
+                const selectVoice = () => {
+                    const voices = window.speechSynthesis.getVoices();
+
+                    // Priority order for voice selection (prefer female UK voices)
+                    const voicePreferences = [
+                        // Google UK Female voices (high quality)
+                        (v: SpeechSynthesisVoice) => v.name.includes('Google UK English Female'),
+                        // Microsoft Libby (UK Female, very natural)
+                        (v: SpeechSynthesisVoice) => v.name.includes('Libby'),
+                        // Microsoft Sonia (UK Female)
+                        (v: SpeechSynthesisVoice) => v.name.includes('Sonia'),
+                        // Any UK Female voice
+                        (v: SpeechSynthesisVoice) => v.lang.includes('en-GB') && v.name.toLowerCase().includes('female'),
+                        // Any Female English voice
+                        (v: SpeechSynthesisVoice) => v.lang.includes('en') && v.name.toLowerCase().includes('female'),
+                        // Google US Female
+                        (v: SpeechSynthesisVoice) => v.name.includes('Google US English Female'),
+                        // Any UK English voice
+                        (v: SpeechSynthesisVoice) => v.lang === 'en-GB',
+                        // Any English voice
+                        (v: SpeechSynthesisVoice) => v.lang.startsWith('en'),
+                    ];
+
+                    for (const preference of voicePreferences) {
+                        const voice = voices.find(preference);
+                        if (voice) {
+                            selectedVoiceRef.current = voice;
+                            console.log('Selected voice:', voice.name);
+                            return;
+                        }
+                    }
+
+                    // Fallback to first available voice
+                    if (voices.length > 0) {
+                        selectedVoiceRef.current = voices[0];
+                    }
+                };
+
+                // Voices may load async
+                if (window.speechSynthesis.getVoices().length > 0) {
+                    selectVoice();
+                } else {
+                    window.speechSynthesis.onvoiceschanged = selectVoice;
+                }
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
+    // Voice control functions
+    const startListening = useCallback(() => {
+        if (recognitionRef.current && !isListening) {
+            setInputValue('');
+            setIsListening(true);
+            try {
+                recognitionRef.current.start();
+            } catch (error) {
+                console.error('Speech recognition error:', error);
+                setIsListening(false);
+            }
+        }
+    }, [isListening]);
+
+    const stopListening = useCallback(() => {
+        if (recognitionRef.current && isListening) {
+            recognitionRef.current.stop();
+            setIsListening(false);
+        }
+    }, [isListening]);
+
+    const speakText = useCallback((text: string) => {
+        if (synthRef.current && voiceEnabled) {
+            // Cancel any ongoing speech
+            synthRef.current.cancel();
+
+            // Clean text for speech (remove emojis and markdown)
+            const cleanText = text
+                .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Remove emojis
+                .replace(/\*\*/g, '') // Remove markdown bold
+                .replace(/\n/g, '. ') // Convert newlines to pauses
+                .replace(/•/g, ', ') // Convert bullets
+                .trim();
+
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+
+            // Use selected voice (polite female) or fallback
+            if (selectedVoiceRef.current) {
+                utterance.voice = selectedVoiceRef.current;
+            }
+
+            utterance.lang = 'en-GB';
+            utterance.rate = 0.95; // Slightly slower for clarity
+            utterance.pitch = 1.1; // Slightly higher for warmth
+
+            utterance.onstart = () => setIsSpeaking(true);
+            utterance.onend = () => setIsSpeaking(false);
+            utterance.onerror = () => setIsSpeaking(false);
+
+            synthRef.current.speak(utterance);
+        }
+    }, [voiceEnabled]);
+
+    const stopSpeaking = useCallback(() => {
+        if (synthRef.current) {
+            synthRef.current.cancel();
+            setIsSpeaking(false);
+        }
+    }, []);
+
+    const toggleVoice = useCallback(() => {
+        setVoiceEnabled(prev => {
+            if (prev && synthRef.current) {
+                synthRef.current.cancel();
+                setIsSpeaking(false);
+            }
+            return !prev;
+        });
+    }, []);
+
+    // Handle voice-initiated send (auto-send after speech recognition)
+    const handleVoiceSend = useCallback(async (messageText: string) => {
+        if (!messageText.trim()) return;
+
+        const userMessage: Message = {
+            id: Date.now(),
+            text: messageText,
+            isBot: false,
+            timestamp: new Date()
+        };
+
+        setMessages(prev => [...prev, userMessage]);
+        setInputValue('');
+        setIsTyping(true);
+
+        // Get AI response
+        const responseText = await getAIResponse(messageText);
+
+        const botResponse: Message = {
+            id: Date.now() + 1,
+            text: responseText,
+            isBot: true,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, botResponse]);
+        setIsTyping(false);
+
+        // Speak the bot response
+        speakText(responseText);
+    }, [speakText]);
+
     const clearChat = () => {
+        stopSpeaking();
         setMessages([{
             id: Date.now(),
             text: "Hi there! 👋 I'm your Vital Glow assistant. How can I help you today? You can ask me about our services, booking, pricing, or anything else!",
@@ -192,6 +446,9 @@ const Chatbot = () => {
         };
         setMessages(prev => [...prev, botResponse]);
         setIsTyping(false);
+
+        // Speak the bot response if voice is enabled
+        speakText(responseText);
     };
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -224,6 +481,9 @@ const Chatbot = () => {
         };
         setMessages(prev => [...prev, botResponse]);
         setIsTyping(false);
+
+        // Speak the bot response if voice is enabled
+        speakText(responseText);
     };
 
     return (
@@ -261,6 +521,21 @@ const Chatbot = () => {
                         </div>
                     </div>
                     <div className={styles.headerActions}>
+                        {/* Voice Toggle Button */}
+                        <button
+                            className={`${styles.voiceToggle} ${voiceEnabled ? styles.active : ''}`}
+                            onClick={toggleVoice}
+                            aria-label={voiceEnabled ? 'Disable voice' : 'Enable voice'}
+                            title={voiceEnabled ? 'Voice On' : 'Voice Off'}
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                {voiceEnabled ? (
+                                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                                ) : (
+                                    <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                                )}
+                            </svg>
+                        </button>
                         <button
                             className={styles.clearButton}
                             onClick={clearChat}
@@ -336,13 +611,32 @@ const Chatbot = () => {
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyPress={handleKeyPress}
-                        placeholder="Type your message..."
-                        className={styles.input}
+                        placeholder={isListening ? 'Listening...' : 'Type your message...'}
+                        className={`${styles.input} ${isListening ? styles.inputListening : ''}`}
+                        disabled={isListening}
                     />
+                    {/* Microphone Button */}
+                    {speechSupported && (
+                        <button
+                            className={`${styles.micButton} ${isListening ? styles.listening : ''}`}
+                            onClick={isListening ? stopListening : startListening}
+                            aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+                            title={isListening ? 'Stop' : 'Voice Input'}
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                {isListening ? (
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z" />
+                                ) : (
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                                )}
+                            </svg>
+                            {isListening && <span className={styles.micPulse}></span>}
+                        </button>
+                    )}
                     <button
                         className={styles.sendButton}
                         onClick={handleSend}
-                        disabled={!inputValue.trim()}
+                        disabled={!inputValue.trim() || isListening}
                         aria-label="Send message"
                     >
                         <svg viewBox="0 0 24 24" fill="currentColor">
@@ -350,6 +644,28 @@ const Chatbot = () => {
                         </svg>
                     </button>
                 </div>
+
+                {/* Listening Overlay */}
+                {isListening && (
+                    <div className={styles.listeningOverlay}>
+                        <div className={styles.listeningContent}>
+                            <div className={styles.listeningWaves}>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                            <p>Listening...</p>
+                            <button
+                                className={styles.stopListeningBtn}
+                                onClick={stopListening}
+                            >
+                                Tap to stop
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </>
     );

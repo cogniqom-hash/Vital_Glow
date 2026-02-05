@@ -428,3 +428,213 @@
         border-radius: 0;
     }
 }
+
+/* Voice AI Styles */
+.voiceToggle {
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.15);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.voiceToggle:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.voiceToggle svg {
+    width: 18px;
+    height: 18px;
+    fill: white;
+    opacity: 0.7;
+}
+
+.voiceToggle.active svg {
+    opacity: 1;
+}
+
+/* Microphone Button */
+.micButton {
+    width: 44px;
+    height: 44px;
+    background: rgba(139, 157, 131, 0.1);
+    border: 2px solid var(--color-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.micButton:hover {
+    background: rgba(139, 157, 131, 0.2);
+    transform: scale(1.05);
+}
+
+.micButton svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--color-primary);
+}
+
+.micButton.listening {
+    background: var(--color-primary);
+    animation: micPulseAnimation 1.5s infinite;
+}
+
+.micButton.listening svg {
+    fill: white;
+}
+
+.micPulse {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 2px solid var(--color-primary);
+    animation: micPulseRing 1.5s infinite;
+    pointer-events: none;
+}
+
+@keyframes micPulseAnimation {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(139, 157, 131, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px rgba(139, 157, 131, 0);
+    }
+}
+
+@keyframes micPulseRing {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 0;
+    }
+}
+
+/* Input listening state */
+.inputListening {
+    background: rgba(139, 157, 131, 0.1) !important;
+    border-color: var(--color-primary) !important;
+}
+
+/* Listening Overlay */
+.listeningOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    border-radius: 24px;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.listeningContent {
+    text-align: center;
+}
+
+.listeningContent p {
+    margin: 20px 0 15px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-taupe-dark);
+}
+
+.listeningWaves {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 60px;
+}
+
+.listeningWaves span {
+    width: 6px;
+    height: 30px;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-radius: 3px;
+    animation: wave 1s ease-in-out infinite;
+}
+
+.listeningWaves span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.listeningWaves span:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.listeningWaves span:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+.listeningWaves span:nth-child(4) {
+    animation-delay: 0.3s;
+}
+
+.listeningWaves span:nth-child(5) {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave {
+
+    0%,
+    100% {
+        height: 15px;
+    }
+
+    50% {
+        height: 50px;
+    }
+}
+
+.stopListeningBtn {
+    padding: 10px 24px;
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.stopListeningBtn:hover {
+    background: var(--color-primary-dark);
+    transform: scale(1.05);
+}
