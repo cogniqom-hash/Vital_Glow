@@ -548,7 +548,11 @@ const Chatbot = () => {
                         </button>
                         <button
                             className={styles.closeButton}
-                            onClick={() => setIsOpen(false)}
+                            onClick={() => {
+                                stopSpeaking();
+                                stopListening();
+                                setIsOpen(false);
+                            }}
                             aria-label="Close chat"
                         >
                             <svg viewBox="0 0 24 24" fill="currentColor">
